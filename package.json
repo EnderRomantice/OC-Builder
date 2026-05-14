@@ -1,29 +1,17 @@
 {
-	"name": "oc-builder",
-	"version": "1.0.0",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/EnderRomantice/OC-Builder.git"
-	},
-	"type": "module",
-	"main": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"scripts": {
-		"start": "node dist/index.js",
-		"build": "tsc",
-		"check": "tsc --noEmit",
-		"check:browser-smoke": "echo 'Skipping browser smoke check (no browser UI)'",
-		"dev": "tsc -w"
-	},
-	"dependencies": {
-		"@sinclair/typebox": "^0.34.49",
-		"dotenv": "^16.4.7",
-		"openai": "6.26.0",
-		"wechaty": "^1.20.2",
-		"wechaty-puppet-wechat": "^1.18.4"
-	},
-	"devDependencies": {
-		"@types/node": "^24.12.4",
-		"typescript": "^5.9.3"
-	}
+  "name": "oc-builder-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.1.2",
+  "scripts": {
+    "agent:build": "pnpm --filter @oc-builder/agent build",
+    "agent:check": "pnpm --filter @oc-builder/agent check",
+    "agent:dev": "pnpm --filter @oc-builder/agent dev",
+    "agent:start": "pnpm --filter @oc-builder/agent start",
+    "service:build": "pnpm --filter @oc-builder/service build",
+    "service:start": "pnpm --filter @oc-builder/service start",
+    "service:dev": "pnpm --filter @oc-builder/service start:dev",
+    "service:migrate": "pnpm --filter @oc-builder/service db:migrate",
+    "service:studio": "pnpm --filter @oc-builder/service db:studio"
+  }
 }

@@ -38,9 +38,27 @@ process.on("unhandledRejection", (reason, promise) => {
 });
 
 const client = new OpenAI({
-    apiKey: process.env.DEEPSEEK_API_KEY || "",
+    apiKey: loadDeepSeekApiKey(),
     baseURL: process.env.OPENAI_BASE_URL || "https://api.deepseek.com"
 });
+
+function loadDeepSeekApiKey(): string {
+    const rawApiKey = process.env.DEEPSEEK_API_KEY?.trim() ?? "";
+    const apiKey = rawApiKey.replace(/^Bearer\s+/i, "").trim();
+
+    if (!apiKey) {
+        console.error("[CONFIG] Missing DEEPSEEK_API_KEY. Copy .env.example to .env and set a DeepSeek API key.");
+        process.exit(1);
+    }
+
+    if (!apiKey.startsWith("sk-")) {
+        console.error("[CONFIG] Invalid DEEPSEEK_API_KEY. Set only the raw key, for example: DEEPSEEK_API_KEY=sk-...");
+        console.error("[CONFIG] Do not include quotes, spaces, or the 'Bearer ' prefix.");
+        process.exit(1);
+    }
+
+    return apiKey;
+}
 
 const character = loadCharacterConfig();
 const messageQueues = new Map<string, { timer: NodeJS.Timeout | null; texts: WeChatQueuedText[]; latestRaw: WeChatRawMessage }>();

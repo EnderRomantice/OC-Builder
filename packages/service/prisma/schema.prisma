@@ -1,0 +1,189 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Character {
+  id          String   @id
+  name        String
+  displayName String
+  soulPath    String?
+  modelId     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  memories    Memory[]
+  reflections Reflection[]
+}
+
+model PlatformAccount {
+  id        String   @id @default(cuid())
+  platform  String
+  accountId String
+  label     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contacts      Contact[]
+  conversations Conversation[]
+  events        Event[]
+
+  @@unique([platform, accountId])
+}
+
+model Contact {
+  id                String   @id @default(cuid())
+  platformAccountId String
+  externalId        String
+  memoryId          String
+  name              String
+  alias             String?
+  handle            String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  platformAccount PlatformAccount @relation(fields: [platformAccountId], references: [id], onDelete: Cascade)
+  events          Event[]
+  memories        Memory[]
+  promises        Promise[]
+  reflections     Reflection[]
+
+  @@unique([platformAccountId, externalId])
+  @@unique([memoryId])
+  @@index([name])
+}
+
+model Conversation {
+  id                String   @id @default(cuid())
+  platformAccountId String
+  channel           String
+  externalId        String
+  title             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  platformAccount PlatformAccount @relation(fields: [platformAccountId], references: [id], onDelete: Cascade)
+  events          Event[]
+
+  @@unique([platformAccountId, channel, externalId])
+}
+
+model Event {
+  id                String   @id
+  platformAccountId String
+  contactId         String?
+  conversationId    String?
+  type              String
+  channel           String?
+  text              String?
+  rawJson           String?
+  occurredAt        DateTime
+  createdAt         DateTime @default(now())
+
+  platformAccount PlatformAccount @relation(fields: [platformAccountId], references: [id], onDelete: Cascade)
+  contact         Contact?        @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  conversation    Conversation?   @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  memories        MemoryEvent[]
+
+  @@index([platformAccountId, occurredAt])
+  @@index([contactId, occurredAt])
+  @@index([conversationId, occurredAt])
+  @@index([type])
+}
+
+model Memory {
+  id             String    @id @default(cuid())
+  characterId    String?
+  contactId      String?
+  type           String
+  status         String    @default("active")
+  summary        String
+  content        String?
+  topicsJson     String    @default("[]")
+  emotionsJson   String    @default("[]")
+  metadataJson   String    @default("{}")
+  importance     Float     @default(0.5)
+  confidence     Float     @default(0.7)
+  accessCount    Int       @default(0)
+  lastAccessedAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  character Character?    @relation(fields: [characterId], references: [id], onDelete: SetNull)
+  contact   Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  events    MemoryEvent[]
+  fromLinks MemoryLink[]  @relation("MemoryLinkFrom")
+  toLinks   MemoryLink[]  @relation("MemoryLinkTo")
+
+  @@index([contactId, type, status])
+  @@index([importance])
+  @@index([updatedAt])
+}
+
+model MemoryEvent {
+  memoryId String
+  eventId  String
+  role     String @default("evidence")
+
+  memory Memory @relation(fields: [memoryId], references: [id], onDelete: Cascade)
+  event  Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@id([memoryId, eventId, role])
+}
+
+model MemoryLink {
+  id           String   @id @default(cuid())
+  fromMemoryId String
+  toMemoryId   String
+  relation     String
+  weight       Float    @default(1)
+  createdAt    DateTime @default(now())
+
+  fromMemory Memory @relation("MemoryLinkFrom", fields: [fromMemoryId], references: [id], onDelete: Cascade)
+  toMemory   Memory @relation("MemoryLinkTo", fields: [toMemoryId], references: [id], onDelete: Cascade)
+
+  @@unique([fromMemoryId, toMemoryId, relation])
+}
+
+model Promise {
+  id          String    @id @default(cuid())
+  contactId   String
+  description String
+  status      String    @default("pending")
+  dueAt       DateTime?
+  fulfilledAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId, status])
+}
+
+model Reflection {
+  id          String   @id @default(cuid())
+  characterId String?
+  contactId   String?
+  scope       String
+  content     String
+  periodStart DateTime?
+  periodEnd   DateTime?
+  createdAt   DateTime @default(now())
+
+  character Character? @relation(fields: [characterId], references: [id], onDelete: SetNull)
+  contact   Contact?   @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([contactId, createdAt])
+}
+
+model RetrievalLog {
+  id          String   @id @default(cuid())
+  requestText String
+  filtersJson String   @default("{}")
+  resultJson  String   @default("[]")
+  createdAt   DateTime @default(now())
+}

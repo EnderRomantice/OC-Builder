@@ -1,8 +1,13 @@
 node_modules/
 dist/
+.pnpm-store/
 *.log
 .DS_Store
 *.tsbuildinfo
+*.memory-card.json
+*.db
+*.db-shm
+*.db-wal
 
 # Environment (contains API keys)
 .env
@@ -15,4 +20,5 @@ dist/
 
 # Runtime state
 /memory/
-pi-wechat-bot.memory-card.json
+packages/agent/memory/
+packages/service/prisma/data/
