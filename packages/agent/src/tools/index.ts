@@ -65,10 +65,16 @@ export const tools: AgentTool<any>[] = [
         label: "Complete Task",
         description: "Mark a pending task as completed. Use this when you have fulfilled a promise made to the user.",
         parameters: Type.Object({
-            memoryId: Type.String({ description: "The identifier for the user memory (handle, alias, or name)." }),
+            memoryId: Type.Optional(Type.String({ description: "Legacy file-memory user identifier. Optional when task IDs come from the service promise list." })),
             taskId: Type.String({ description: "The ID of the task to complete." })
         }),
         execute: async (id, params: any) => {
+            if (!params.memoryId) {
+                return {
+                    content: [{ type: "text", text: "Missing legacy memoryId for file-memory task completion." }],
+                    details: { taskId: params.taskId, status: "not_completed" }
+                };
+            }
             taskManager.completeTask(params.memoryId, params.taskId);
             return { 
                 content: [{ type: "text", text: `Task ${params.taskId} marked as completed for ${params.memoryId}.` }], 

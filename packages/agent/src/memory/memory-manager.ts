@@ -38,6 +38,15 @@ export class MemoryManager {
         return "好感度: 50/100 (初次见面)\n标签: []\n关键事实: 无";
     }
 
+    getRecentHistory(contactId: string, maxChars = 8000): string {
+        const historyPath = join(this.getUserDir(contactId), "chat_history.md");
+        if (!existsSync(historyPath)) return "No persisted chat history.";
+
+        const history = readFileSync(historyPath, "utf8");
+        if (history.length <= maxChars) return history;
+        return history.slice(-maxChars);
+    }
+
     // 2. 更新用户印象（支持 AI 结构化更新）
     updateUserProfile(contactId: string, profileContent: string) {
         const profilePath = join(this.getUserDir(contactId), "profile.md");

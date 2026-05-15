@@ -1,9 +1,10 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
-import { RecordEventDto } from "./events.controller";
+import type { RecordEventDto } from "./events.controller";
 import { parseJsonArray, toJson } from "./json";
-import { CreateMemoryDto } from "./memories.controller";
-import { CreatePromiseDto, UpdatePromiseDto } from "./promises.controller";
+import type { CreateMemoryDto, CurateMemoryDto, MemoryDraftDto, MemoryPatchDto } from "./memories.controller";
+import type { CreateProactiveTaskDto, UpdateProactiveTaskDto } from "./proactive-tasks.controller";
+import type { CreatePromiseDto, UpdatePromiseDto } from "./promises.controller";
 
 @Injectable()
 export class MemoriesService {
@@ -118,6 +119,117 @@ export class MemoriesService {
     });
   }
 
+  async curateMemory(input: CurateMemoryDto) {
+    if (input.action === "ignore") {
+      return {
+        action: "ignore",
+        reason: input.reason || "Ignored by memory review."
+      };
+    }
+
+    if (input.action === "create") {
+      if (!input.memory) throw new Error("create requires memory");
+      const memory = await this.createCuratedMemory(input.memory, input.reason);
+      return { action: "create", memory };
+    }
+
+    if (input.action === "merge") {
+      if (!input.targetMemoryId || !input.patch) throw new Error("merge requires targetMemoryId and patch");
+      const memory = await this.mergeMemory(input.targetMemoryId, input.patch, input.reason);
+      return { action: "merge", memory };
+    }
+
+    if (input.action === "supersede") {
+      if (!input.oldMemoryId || !input.memory) throw new Error("supersede requires oldMemoryId and memory");
+      const memory = await this.supersedeMemory(input.oldMemoryId, input.memory, input.reason);
+      return { action: "supersede", memory };
+    }
+
+    throw new Error(`Unsupported memory curation action: ${input.action}`);
+  }
+
+  private async createCuratedMemory(input: MemoryDraftDto, reviewReason?: string) {
+    return this.prisma.memory.create({
+      data: {
+        characterId: input.characterId,
+        contactId: input.contactId,
+        type: input.type,
+        summary: input.summary,
+        content: input.content,
+        topicsJson: toJson(input.topics, []),
+        emotionsJson: toJson(input.emotions, []),
+        metadataJson: this.withReviewReason(input.metadata, reviewReason),
+        importance: input.importance ?? 0.5,
+        confidence: input.confidence ?? 0.7,
+        events: this.eventLinks(input.sourceEventIds)
+      }
+    });
+  }
+
+  private async mergeMemory(targetMemoryId: string, patch: MemoryPatchDto, reviewReason?: string) {
+    const existing = await this.prisma.memory.findUniqueOrThrow({
+      where: { id: targetMemoryId }
+    });
+    const nextMetadata = {
+      ...this.parseJsonObject(existing.metadataJson),
+      ...this.parseMetadata(patch.metadata),
+      ...(reviewReason ? { lastReviewReason: reviewReason } : {})
+    };
+
+    return this.prisma.$transaction(async (tx: any) => {
+      const memory = await tx.memory.update({
+        where: { id: targetMemoryId },
+        data: {
+          summary: patch.summary,
+          content: patch.content,
+          topicsJson: patch.topics ? toJson(this.mergeStrings(parseJsonArray(existing.topicsJson), patch.topics), []) : undefined,
+          emotionsJson: patch.emotions ? toJson(this.mergeStrings(parseJsonArray(existing.emotionsJson), patch.emotions), []) : undefined,
+          metadataJson: toJson(nextMetadata, {}),
+          importance: patch.importance,
+          confidence: patch.confidence
+        }
+      });
+
+      await this.linkSourceEvents(tx, targetMemoryId, patch.sourceEventIds);
+      return memory;
+    });
+  }
+
+  private async supersedeMemory(oldMemoryId: string, input: MemoryDraftDto, reviewReason?: string) {
+    return this.prisma.$transaction(async (tx: any) => {
+      await tx.memory.update({
+        where: { id: oldMemoryId },
+        data: { status: "superseded" }
+      });
+
+      const memory = await tx.memory.create({
+        data: {
+          characterId: input.characterId,
+          contactId: input.contactId,
+          type: input.type,
+          summary: input.summary,
+          content: input.content,
+          topicsJson: toJson(input.topics, []),
+          emotionsJson: toJson(input.emotions, []),
+          metadataJson: this.withReviewReason(input.metadata, reviewReason),
+          importance: input.importance ?? 0.5,
+          confidence: input.confidence ?? 0.7,
+          events: this.eventLinks(input.sourceEventIds)
+        }
+      });
+
+      await tx.memoryLink.create({
+        data: {
+          fromMemoryId: memory.id,
+          toMemoryId: oldMemoryId,
+          relation: "supersedes"
+        }
+      });
+
+      return memory;
+    });
+  }
+
   async searchMemories(input: {
     contactId?: string;
     type?: string;
@@ -182,5 +294,122 @@ export class MemoriesService {
         fulfilledAt: input.status === "done" ? new Date() : undefined
       }
     });
+  }
+
+  createProactiveTask(input: CreateProactiveTaskDto) {
+    return this.prisma.proactiveTask.create({
+      data: {
+        characterId: input.characterId,
+        contactId: input.contactId,
+        type: input.type,
+        reason: input.reason,
+        promptContext: input.promptContext,
+        scheduledAt: new Date(input.scheduledAt),
+        sourceMemoryIdsJson: toJson(input.sourceMemoryIds, []),
+        sourcePromiseIdsJson: toJson(input.sourcePromiseIds, [])
+      }
+    });
+  }
+
+  listProactiveTasks(input: {
+    contactId?: string;
+    status?: string;
+    dueBefore?: string;
+    limit?: number;
+  }) {
+    return this.prisma.proactiveTask.findMany({
+      where: {
+        contactId: input.contactId,
+        status: input.status,
+        scheduledAt: input.dueBefore ? { lte: new Date(input.dueBefore) } : undefined
+      },
+      orderBy: { scheduledAt: "asc" },
+      take: Math.min(input.limit || 50, 200)
+    });
+  }
+
+  updateProactiveTask(id: string, input: UpdateProactiveTaskDto) {
+    return this.prisma.proactiveTask.update({
+      where: { id },
+      data: {
+        status: input.status,
+        scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : undefined,
+        lastError: input.lastError === null ? null : input.lastError,
+        attempts: input.incrementAttempts ? { increment: 1 } : undefined
+      }
+    });
+  }
+
+  private eventLinks(sourceEventIds?: string[]) {
+    const uniqueIds = [...new Set(sourceEventIds || [])].filter(Boolean);
+    return uniqueIds.length
+      ? {
+          create: uniqueIds.map((eventId) => ({
+            event: { connect: { id: eventId } }
+          }))
+        }
+      : undefined;
+  }
+
+  private async linkSourceEvents(
+    tx: any,
+    memoryId: string,
+    sourceEventIds?: string[]
+  ) {
+    const uniqueIds = [...new Set(sourceEventIds || [])].filter(Boolean);
+    if (uniqueIds.length === 0) return;
+
+    for (const eventId of uniqueIds) {
+      await tx.memoryEvent.upsert({
+        where: {
+          memoryId_eventId_role: {
+            memoryId,
+            eventId,
+            role: "evidence"
+          }
+        },
+        create: {
+          memoryId,
+          eventId,
+          role: "evidence"
+        },
+        update: {}
+      });
+    }
+  }
+
+  private withReviewReason(metadata: unknown, reviewReason?: string) {
+    return toJson({
+      ...this.parseMetadata(metadata),
+      ...(reviewReason ? { reviewReason } : {})
+    }, {});
+  }
+
+  private parseMetadata(metadata: unknown): Record<string, unknown> {
+    return metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      ? metadata as Record<string, unknown>
+      : {};
+  }
+
+  private parseJsonObject(value: string): Record<string, unknown> {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private mergeStrings(existing: unknown[], incoming: string[]): string[] {
+    const values = new Set<string>();
+    for (const item of existing) {
+      if (typeof item === "string" && item.trim()) values.add(item.trim());
+    }
+    for (const item of incoming) {
+      if (typeof item === "string" && item.trim()) values.add(item.trim());
+    }
+    return [...values];
   }
 }

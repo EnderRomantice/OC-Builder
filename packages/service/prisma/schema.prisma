@@ -17,6 +17,7 @@ model Character {
   updatedAt   DateTime @updatedAt
 
   memories    Memory[]
+  proactiveTasks ProactiveTask[]
   reflections Reflection[]
 }
 
@@ -50,6 +51,7 @@ model Contact {
   events          Event[]
   memories        Memory[]
   promises        Promise[]
+  proactiveTasks  ProactiveTask[]
   reflections     Reflection[]
 
   @@unique([platformAccountId, externalId])
@@ -161,6 +163,29 @@ model Promise {
 
   contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
+  @@index([contactId, status])
+}
+
+model ProactiveTask {
+  id                   String    @id @default(cuid())
+  characterId          String?
+  contactId            String
+  type                 String
+  reason               String
+  promptContext        String?
+  scheduledAt          DateTime
+  status               String    @default("pending")
+  sourceMemoryIdsJson  String    @default("[]")
+  sourcePromiseIdsJson String    @default("[]")
+  attempts             Int       @default(0)
+  lastError            String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  character Character? @relation(fields: [characterId], references: [id], onDelete: SetNull)
+  contact   Contact    @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledAt])
   @@index([contactId, status])
 }
 

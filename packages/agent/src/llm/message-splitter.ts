@@ -5,37 +5,50 @@ export async function splitMessageWithAI(
     modelId: string,
     text: string
 ): Promise<string[]> {
-    const prompt = `
-You are a WeChat message splitter. Your task is to split a long response into 2-5 natural, casual chat bubbles.
-- Break it into 1-5 chunks (MANDATORY: NEVER more than 5).
-- Keep each chunk short and conversational.
-- Remove all markdown formatting (no Bold, no Headings).
-- No emojis.
-- Return ONLY the split chunks, one per line. No JSON, no markdown.
+    void client;
+    void modelId;
+    return splitMessageDeterministically(text);
+}
 
-Input Text:
-${text}
-`;
+function splitMessageDeterministically(text: string): string[] {
+    const clean = text
+        .replace(/\*\*/g, "")
+        .replace(/^#{1,6}\s*/gm, "")
+        .trim();
+    if (!clean) return [];
 
-    try {
-        const response = await client.chat.completions.create({
-            model: modelId,
-            messages: [{ role: "system", content: prompt }],
-        });
-
-        const rawContent = response.choices[0].message.content || text;
-        console.log(`[DEBUG] Raw Splitter Response: ${rawContent}`);
-
-        let cleanContent = rawContent.trim();
-        // Remove markdown wrappers if present
-        if (cleanContent.startsWith("```")) {
-            cleanContent = cleanContent.replace(/^```[a-z]*\n?/, "").replace(/```$/, "").trim();
-        }
-
-        return cleanContent.split("\n").filter(line => line.trim().length > 0);
-    } catch (e) {
-        console.error("AI Splitting Error:", e);
-        // Fallback to basic newline splitting (SAFEST for URLs)
-        return text.split("\n").filter(line => line.trim().length > 0);
+    const explicitLines = clean.split(/\n+/).map(line => line.trim()).filter(Boolean);
+    const chunks: string[] = [];
+    for (const line of explicitLines) {
+        chunks.push(...splitLongLine(line, 90));
     }
+
+    return chunks.slice(0, 5);
+}
+
+function splitLongLine(line: string, maxLength: number): string[] {
+    if (line.length <= maxLength) return [line];
+
+    const parts = line
+        .split(/(?<=[。！？!?~～])\s*/)
+        .map(part => part.trim())
+        .filter(Boolean);
+    if (parts.length <= 1) return [line];
+
+    const chunks: string[] = [];
+    let current = "";
+    for (const part of parts) {
+        if (!current) {
+            current = part;
+            continue;
+        }
+        if ((current + part).length > maxLength) {
+            chunks.push(current);
+            current = part;
+        } else {
+            current += part;
+        }
+    }
+    if (current) chunks.push(current);
+    return chunks;
 }

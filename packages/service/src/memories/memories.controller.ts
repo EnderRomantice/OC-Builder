@@ -15,6 +15,40 @@ export class CreateMemoryDto {
   sourceEventIds?: string[];
 }
 
+export class MemoryDraftDto {
+  characterId?: string;
+  contactId: string;
+  type: string;
+  summary: string;
+  content?: string;
+  topics?: string[];
+  emotions?: string[];
+  metadata?: unknown;
+  importance?: number;
+  confidence?: number;
+  sourceEventIds?: string[];
+}
+
+export class MemoryPatchDto {
+  summary?: string;
+  content?: string;
+  topics?: string[];
+  emotions?: string[];
+  metadata?: unknown;
+  importance?: number;
+  confidence?: number;
+  sourceEventIds?: string[];
+}
+
+export class CurateMemoryDto {
+  action: "create" | "merge" | "supersede" | "ignore";
+  reason?: string;
+  targetMemoryId?: string;
+  oldMemoryId?: string;
+  memory?: MemoryDraftDto;
+  patch?: MemoryPatchDto;
+}
+
 @Controller("memories")
 export class MemoriesController {
   constructor(private readonly memories: MemoriesService) {}
@@ -22,6 +56,11 @@ export class MemoriesController {
   @Post()
   createMemory(@Body() body: CreateMemoryDto) {
     return this.memories.createMemory(body);
+  }
+
+  @Post("curate")
+  curateMemory(@Body() body: CurateMemoryDto) {
+    return this.memories.curateMemory(body);
   }
 
   @Get()

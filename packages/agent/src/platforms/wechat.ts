@@ -16,6 +16,9 @@ export type WeChatQueuedText = {
 };
 
 export function createWeChatRuntimeActions(bot: any): SocialRuntimeActions {
+    const privateMessageQueues = new Map<string, Promise<void>>();
+    const outboundQueues = new Map<string, Promise<void>>();
+
     return {
         searchContacts: async query => {
             const contacts = await bot.Contact.findAll({ name: query });
@@ -28,11 +31,33 @@ export function createWeChatRuntimeActions(bot: any): SocialRuntimeActions {
         sendPrivateMessage: async (contactId, text) => {
             const target = await bot.Contact.find({ id: contactId });
             if (!target) return { success: false };
-            await target.say(text);
+            const previous = privateMessageQueues.get(contactId) || Promise.resolve();
+            const next = previous.catch(() => undefined).then(async () => {
+                await target.say(text);
+            });
+            privateMessageQueues.set(contactId, next.finally(() => {
+                if (privateMessageQueues.get(contactId) === next) {
+                    privateMessageQueues.delete(contactId);
+                }
+            }));
+            await next;
             return { success: true, label: target.name() };
         },
         sendMessage: async action => {
-            await sendWechatMessage(bot, action);
+            const queueKey = [
+                action.target.channel,
+                action.target.roomId || action.target.contactId || ""
+            ].join(":");
+            const previous = outboundQueues.get(queueKey) || Promise.resolve();
+            const next = previous.catch(() => undefined).then(async () => {
+                await sendWechatMessage(bot, action);
+            });
+            outboundQueues.set(queueKey, next.finally(() => {
+                if (outboundQueues.get(queueKey) === next) {
+                    outboundQueues.delete(queueKey);
+                }
+            }));
+            await next;
         }
     };
 }
@@ -78,6 +103,7 @@ export async function createWeChatMessageEvent(
     const alias = await safeAlias(contact);
     const handle = safeHandle(contact);
     const accountId = bot.currentUser?.id || "wechat";
+    const accountName = bot.currentUser?.name?.() || "";
     const memoryId = ["wechat", accountId, contactId].join("__");
     const segments = await Promise.all(texts.map(async item => {
         const itemContactId = item.contact.id;
@@ -108,6 +134,7 @@ export async function createWeChatMessageEvent(
         receivedAt: new Date().toISOString(),
         channel: room ? "group" : "private",
         channelId: room?.id,
+        accountName,
         contact: {
             id: contactId,
             name: contactName,

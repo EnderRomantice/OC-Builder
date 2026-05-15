@@ -24,7 +24,7 @@ export class ActionDispatcher {
         ].join(":");
 
         if (this.executed.has(key)) return;
-        this.executed.add(key);
         await this.actions.sendMessage(action);
+        this.executed.add(key);
     }
 }

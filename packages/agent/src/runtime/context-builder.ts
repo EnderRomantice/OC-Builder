@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { CharacterConfig, ContextPack, SocialMessageEvent } from "../core/types.js";
 import { memoryManager } from "../memory/memory-manager.js";
+import { memoryRetriever } from "../memory/memory-retriever.js";
+import { serviceMemoryClient } from "../memory/service-memory-client.js";
 import { taskManager } from "../memory/task-manager.js";
 
 export class ContextBuilder {
@@ -9,24 +11,47 @@ export class ContextBuilder {
 
     constructor(private readonly character: CharacterConfig) {}
 
-    build(event: SocialMessageEvent): ContextPack {
+    async build(event: SocialMessageEvent): Promise<ContextPack> {
         const roomKey = this.getRoomKey(event);
         const relationshipKey = this.getRelationshipKey(event);
 
         if (!this.roomSessions.has(roomKey)) this.roomSessions.set(roomKey, []);
         if (!this.relationshipSessions.has(relationshipKey)) this.relationshipSessions.set(relationshipKey, []);
 
+        const fileProfile = memoryManager.getUserProfile(event.contact.memoryId);
+        const fileHistory = memoryManager.getRecentHistory(event.contact.memoryId);
+        const fileTasks = taskManager.formatTasksForPrompt(event.contact.memoryId);
+
+        let serviceContactId: string | undefined;
+        let userProfile = fileProfile;
+        let recentHistory = fileHistory;
+        let pendingTasks = fileTasks;
+
+        try {
+            const serviceContext = await serviceMemoryClient.prepareEvent(this.character, event);
+            serviceContactId = serviceContext.contactId;
+            userProfile = (await memoryRetriever.retrieve(serviceContext.contactId, event)).text;
+            recentHistory = event.channel === "group"
+                ? "Group chat: contact-level persisted private history is withheld. Use the current room history and latest message only."
+                : await serviceMemoryClient.getRecentHistory(serviceContext.contactId);
+            pendingTasks = await serviceMemoryClient.getPendingTasks(serviceContext.contactId);
+        } catch (e) {
+            console.warn(`[MEMORY] Service unavailable, using file memory fallback: ${e instanceof Error ? e.message : String(e)}`);
+        }
+
         return {
             event,
             soul: this.loadSoul(),
-            userProfile: memoryManager.getUserProfile(event.contact.memoryId),
-            pendingTasks: taskManager.formatTasksForPrompt(event.contact.memoryId),
+            userProfile,
+            recentHistory,
+            pendingTasks,
+            serviceContactId,
             roomHistory: this.roomSessions.get(roomKey)!,
             relationshipHistory: this.relationshipSessions.get(relationshipKey)!
         };
     }
 
-    appendResult(event: SocialMessageEvent, finalContent: string) {
+    appendResult(event: SocialMessageEvent, finalContent: string, targetChannel: "GROUP" | "PRIVATE") {
         const roomHistory = this.roomSessions.get(this.getRoomKey(event));
         const relationshipHistory = this.relationshipSessions.get(this.getRelationshipKey(event));
         const userMessage = {
@@ -35,7 +60,14 @@ export class ContextBuilder {
         };
         const assistantMessage = { role: "assistant", content: finalContent };
 
-        roomHistory?.push(userMessage, assistantMessage);
+        if (event.channel === "group") {
+            roomHistory?.push(userMessage);
+            if (targetChannel === "GROUP") {
+                roomHistory?.push(assistantMessage);
+            }
+        } else {
+            roomHistory?.push(userMessage, assistantMessage);
+        }
         relationshipHistory?.push({ role: "user", content: event.text }, assistantMessage);
 
         this.trim(roomHistory);

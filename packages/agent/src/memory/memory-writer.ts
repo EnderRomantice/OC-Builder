@@ -11,6 +11,10 @@ export class MemoryWriter {
         );
     }
 
+    updateProfile(memoryId: string, profileContent: string) {
+        memoryManager.updateUserProfile(memoryId, profileContent);
+    }
+
     async applyProposal(proposal: MemoryProposalAction) {
         if (proposal.subject.characterId !== this.character.id) return;
 
