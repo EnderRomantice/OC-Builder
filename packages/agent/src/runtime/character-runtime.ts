@@ -44,18 +44,22 @@ export class CharacterRuntime {
         const record = this.inbox.enqueue(event);
         if (record.status !== "pending") return;
 
-        await this.scheduler.schedule(event, async () => {
-            this.inbox.markProcessing(event.id);
+        const result = await this.scheduler.scheduleLatest(event, async (scheduledEvent) => {
+            this.inbox.markProcessing(scheduledEvent.id);
             try {
-                if (event.type === "message.received") {
-                    await this.processMessage(event);
+                if (scheduledEvent.type === "message.received") {
+                    await this.processMessage(scheduledEvent);
                 }
-                this.inbox.markDone(event.id);
+                this.inbox.markDone(scheduledEvent.id);
             } catch (e) {
-                this.inbox.markFailed(event.id, e);
+                this.inbox.markFailed(scheduledEvent.id, e);
                 throw e;
             }
         });
+        if (result === "skipped") {
+            this.inbox.markDone(event.id);
+            console.log(`[SCHEDULER] Skipped stale event ${event.id}; newer message batch will be processed.`);
+        }
     }
 
     async processMessage(event: SocialMessageEvent) {
@@ -184,7 +188,11 @@ export class CharacterRuntime {
     private hasMeaningfulMemoryValue(value?: string | null): value is string {
         if (!value) return false;
         const normalized = value.trim().toLowerCase();
-        return normalized.length > 0 && normalized !== "null" && normalized !== "none";
+        return normalized.length > 0
+            && normalized !== "null"
+            && normalized !== "none"
+            && normalized !== "no update."
+            && normalized !== "full new content for profile.md";
     }
 
     private async persistAfterReply(

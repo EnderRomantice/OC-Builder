@@ -29,18 +29,18 @@ function loadDefaultCharacter(): CharacterConfig {
         id: process.env.CHARACTER_ID || "kaede-akamatsu",
         name: process.env.CHARACTER_NAME || "Kaede Akamatsu",
         displayName: process.env.CHARACTER_DISPLAY_NAME || "赤松枫",
-        soulPath: process.env.CHARACTER_SOUL_PATH || join(process.cwd(), "soul", "rustlove2006.md"),
+        soulPath: process.env.CHARACTER_SOUL_PATH || join(process.cwd(), "soul", "Kaede Akamatsu.md"),
         modelId: process.env.CHARACTER_MODEL || "deepseek-chat"
     };
 }
 
 function loadKnownCharacter(id: string): CharacterConfig {
-    if (id === "kaede" || id === "kaede-akamatsu") {
+    if (id === "kaede" || id === "kaede-akamatsu" || id === "rustlove2006") {
         return {
             id: "kaede-akamatsu",
             name: "Kaede Akamatsu",
             displayName: "赤松枫",
-            soulPath: join(process.cwd(), "soul", "rustlove2006.md"),
+            soulPath: join(process.cwd(), "soul", "Kaede Akamatsu.md"),
             modelId: process.env.CHARACTER_MODEL || "deepseek-chat"
         };
     }

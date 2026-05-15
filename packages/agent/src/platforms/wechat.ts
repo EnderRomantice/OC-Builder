@@ -17,7 +17,7 @@ export type WeChatQueuedText = {
 
 export function createWeChatRuntimeActions(bot: any): SocialRuntimeActions {
     const privateMessageQueues = new Map<string, Promise<void>>();
-    const outboundQueues = new Map<string, Promise<void>>();
+    const outboundLimiter = new WeChatOutboundLimiter();
 
     return {
         searchContacts: async query => {
@@ -44,22 +44,40 @@ export function createWeChatRuntimeActions(bot: any): SocialRuntimeActions {
             return { success: true, label: target.name() };
         },
         sendMessage: async action => {
-            const queueKey = [
-                action.target.channel,
-                action.target.roomId || action.target.contactId || ""
-            ].join(":");
-            const previous = outboundQueues.get(queueKey) || Promise.resolve();
-            const next = previous.catch(() => undefined).then(async () => {
+            await outboundLimiter.enqueue(action.target.roomId || action.target.contactId || "unknown", async () => {
                 await sendWechatMessage(bot, action);
             });
-            outboundQueues.set(queueKey, next.finally(() => {
-                if (outboundQueues.get(queueKey) === next) {
-                    outboundQueues.delete(queueKey);
-                }
-            }));
-            await next;
         }
     };
+}
+
+class WeChatOutboundLimiter {
+    private queue = Promise.resolve();
+    private lastSentAt = 0;
+    private lastTargetKey = "";
+
+    private readonly minAccountIntervalMs = Number(process.env.WECHAT_SEND_INTERVAL_MS || 4000);
+    private readonly sameTargetExtraIntervalMs = Number(process.env.WECHAT_SAME_TARGET_EXTRA_INTERVAL_MS || 2000);
+
+    enqueue(targetKey: string, task: () => Promise<void>): Promise<void> {
+        const next = this.queue.catch(() => undefined).then(async () => {
+            await this.waitForSlot(targetKey);
+            await task();
+            this.lastSentAt = Date.now();
+            this.lastTargetKey = targetKey;
+        });
+        this.queue = next;
+        return next;
+    }
+
+    private async waitForSlot(targetKey: string) {
+        const extra = targetKey === this.lastTargetKey ? this.sameTargetExtraIntervalMs : 0;
+        const minInterval = this.minAccountIntervalMs + extra;
+        const waitMs = Math.max(0, this.lastSentAt + minInterval - Date.now());
+        if (waitMs > 0) {
+            await new Promise(resolve => setTimeout(resolve, waitMs));
+        }
+    }
 }
 
 async function sendWechatMessage(bot: any, action: SendMessageAction) {
