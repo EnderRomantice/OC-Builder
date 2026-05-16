@@ -43,6 +43,26 @@ export interface ServiceProactiveTask {
     status: string;
 }
 
+export interface ServiceContactRecord {
+    id: string;
+    externalId: string;
+    memoryId: string;
+    name: string;
+    alias?: string | null;
+    handle?: string | null;
+    platformAccount: {
+        platform: string;
+        accountId: string;
+        label?: string | null;
+    };
+    events?: Array<{
+        id: string;
+        type: string;
+        text?: string | null;
+        occurredAt: string;
+    }>;
+}
+
 export interface CreateServiceProactiveTaskInput {
     characterId?: string;
     contactId: string;
@@ -109,7 +129,7 @@ export type ServiceMemoryCurationInput =
 export class ServiceMemoryClient {
     readonly baseUrl: string;
 
-    constructor(baseUrl = process.env.OC_SERVICE_URL || "http://127.0.0.1:3001/api") {
+    constructor(baseUrl = process.env.OC_SERVICE_URL || process.env.OC_BUILDER_SERVICE_URL || "http://127.0.0.1:3001/api") {
         this.baseUrl = baseUrl.replace(/\/+$/, "");
     }
 
@@ -261,8 +281,31 @@ export class ServiceMemoryClient {
         return this.get<ServiceProactiveTask[]>(`/proactive-tasks?${params.toString()}`);
     }
 
-    async updateProactiveTask(id: string, input: { status?: string; lastError?: string | null; incrementAttempts?: boolean }): Promise<void> {
+    async getPendingProactiveTasks(contactId: string, limit = 20): Promise<ServiceProactiveTask[]> {
+        const params = new URLSearchParams({
+            contactId,
+            status: "pending",
+            limit: String(limit)
+        });
+
+        return this.get<ServiceProactiveTask[]>(`/proactive-tasks?${params.toString()}`);
+    }
+
+    async updateProactiveTask(id: string, input: { status?: string; scheduledAt?: string; lastError?: string | null; incrementAttempts?: boolean }): Promise<void> {
         await this.patch(`/proactive-tasks/${encodeURIComponent(id)}`, input);
+    }
+
+    async getContact(id: string): Promise<ServiceContactRecord> {
+        return this.get<ServiceContactRecord>(`/contacts/${encodeURIComponent(id)}`);
+    }
+
+    async listContacts(input: { platform?: string; accountId?: string; limit?: number }): Promise<ServiceContactRecord[]> {
+        const params = new URLSearchParams();
+        if (input.platform) params.set("platform", input.platform);
+        if (input.accountId) params.set("accountId", input.accountId);
+        params.set("limit", String(input.limit || 100));
+
+        return this.get<ServiceContactRecord[]>(`/contacts?${params.toString()}`);
     }
 
     async createProfileMemory(characterId: string, contactId: string, content: string, sourceEventIds: string[]): Promise<void> {

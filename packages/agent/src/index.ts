@@ -2,8 +2,9 @@ import "dotenv/config";
 import OpenAI from "openai";
 import { WechatyBuilder } from "wechaty";
 import { loadCharacterConfigs } from "./character/config.js";
-import type { CharacterConfig } from "./core/types.js";
+import type { CharacterConfig, SocialRuntimeActions } from "./core/types.js";
 import { createWeChatMessageEvent, createWeChatRuntimeActions, type WeChatQueuedText, type WeChatRawMessage } from "./platforms/wechat.js";
+import { ProactiveRuntime } from "./proactive/proactive-runtime.js";
 import { CharacterRuntime } from "./runtime/character-runtime.js";
 import { tools as agentTools } from "./tools/index.js";
 
@@ -40,6 +41,8 @@ process.on("unhandledRejection", (reason, promise) => {
 class BotSession {
     private bot: any;
     private runtime?: CharacterRuntime;
+    private proactiveRuntime?: ProactiveRuntime;
+    private actions?: SocialRuntimeActions;
     private isRestarting = false;
     private errorCount = 0;
     private restartAttempts = 0;
@@ -57,12 +60,18 @@ class BotSession {
         this.bot = WechatyBuilder.build({
             name: this.wechatyName()
         });
+        this.actions = createWeChatRuntimeActions(this.bot);
 
         this.runtime = new CharacterRuntime({
             character: this.character,
             client,
             tools: agentTools,
-            actions: createWeChatRuntimeActions(this.bot)
+            actions: this.actions
+        });
+        this.proactiveRuntime = new ProactiveRuntime({
+            character: this.character,
+            client,
+            actions: this.actions
         });
 
         this.attachBotHandlers(this.bot);
@@ -77,6 +86,7 @@ class BotSession {
         console.log(`[SYSTEM] ${this.label()} protocol failure detected (${reason}). Rebuilding bot in ${Math.round(delayMs / 1000)}s...`);
 
         try {
+            this.proactiveRuntime?.stop();
             this.state = "stopping";
             await this.bot?.stop();
         } catch (e) {
@@ -111,6 +121,7 @@ class BotSession {
             this.errorCount = 0;
             this.restartAttempts = 0;
             console.log(`${this.ordinal}. ${this.character.displayName}：logged in as ${user.name()}`);
+            this.proactiveRuntime?.start(user.id);
         });
 
         activeBot.on("error", (error: Error) => {

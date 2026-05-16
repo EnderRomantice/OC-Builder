@@ -61,4 +61,39 @@ export class IdentityService {
       }
     });
   }
+
+  getContact(id: string) {
+    return this.prisma.contact.findUniqueOrThrow({
+      where: { id },
+      include: { platformAccount: true }
+    });
+  }
+
+  async listContacts(input: { platform?: string; accountId?: string; limit?: number }) {
+    const account = input.platform && input.accountId
+      ? await this.prisma.platformAccount.findUnique({
+          where: {
+            platform_accountId: {
+              platform: input.platform,
+              accountId: input.accountId
+            }
+          }
+        })
+      : null;
+
+    if (input.platform && input.accountId && !account) return [];
+
+    return this.prisma.contact.findMany({
+      where: account ? { platformAccountId: account.id } : undefined,
+      include: {
+        platformAccount: true,
+        events: {
+          orderBy: { occurredAt: "desc" },
+          take: 6
+        }
+      },
+      orderBy: { updatedAt: "desc" },
+      take: Math.min(input.limit || 100, 300)
+    });
+  }
 }

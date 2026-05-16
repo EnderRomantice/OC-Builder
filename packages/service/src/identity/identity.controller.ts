@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
 import { IdentityService } from "./identity.service";
 
 export class UpsertCharacterDto {
@@ -42,5 +42,23 @@ export class IdentityController {
   @Post("contacts")
   upsertContact(@Body() body: UpsertContactDto) {
     return this.identity.upsertContact(body);
+  }
+
+  @Get("contacts/:id")
+  getContact(@Param("id") id: string) {
+    return this.identity.getContact(id);
+  }
+
+  @Get("contacts")
+  listContacts(
+    @Query("platform") platform?: string,
+    @Query("accountId") accountId?: string,
+    @Query("limit") limit?: string
+  ) {
+    return this.identity.listContacts({
+      platform,
+      accountId,
+      limit: limit ? Number(limit) : undefined
+    });
   }
 }
