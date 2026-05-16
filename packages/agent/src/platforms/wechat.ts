@@ -1,6 +1,6 @@
 import { existsSync, renameSync } from "node:fs";
 import { join } from "node:path";
-import type { SendMessageAction, SocialMessageEvent, SocialRuntimeActions } from "../core/types.js";
+import type { SendMessageAction, SocialContact, SocialMessageEvent, SocialRuntimeActions } from "../core/types.js";
 
 export type WeChatRawMessage = {
     message: any;
@@ -141,6 +141,9 @@ export async function createWeChatMessageEvent(
         };
     }));
     const text = segments.map(segment => `${segment.contact.name}: ${segment.text}`).join("\n");
+    const mentionedContacts = room
+        ? await resolveMentionedContacts(room, texts, accountId, segments.map(segment => segment.contact))
+        : [];
 
     migrateLegacyMemory(contactId, memoryId);
 
@@ -160,9 +163,72 @@ export async function createWeChatMessageEvent(
             handle,
             memoryId
         },
+        mentionedContacts,
         text,
         segments,
         raw
+    };
+}
+
+async function resolveMentionedContacts(
+    room: any,
+    texts: WeChatQueuedText[],
+    accountId: string,
+    segmentContacts: SocialContact[]
+): Promise<SocialContact[]> {
+    const byId = new Map<string, SocialContact>();
+    for (const contact of segmentContacts) {
+        byId.set(contact.id, contact);
+    }
+
+    for (const item of texts) {
+        for (const contact of await safeMentionList(item.message)) {
+            byId.set(contact.id, await toSocialContact(contact, accountId));
+        }
+    }
+
+    const roomMembers = await safeRoomMembers(room);
+    const combinedText = texts.map(item => item.text).join("\n");
+    for (const member of roomMembers) {
+        const contact = await toSocialContact(member, accountId);
+        if (byId.has(contact.id)) continue;
+        if (contact.name && combinedText.includes(contact.name)) {
+            byId.set(contact.id, contact);
+            continue;
+        }
+        if (contact.alias && combinedText.includes(contact.alias)) {
+            byId.set(contact.id, contact);
+        }
+    }
+
+    return [...byId.values()];
+}
+
+async function safeMentionList(message: any): Promise<any[]> {
+    try {
+        if (typeof message.mentionList === "function") {
+            return await message.mentionList();
+        }
+    } catch (e) {}
+    return [];
+}
+
+async function safeRoomMembers(room: any): Promise<any[]> {
+    try {
+        if (typeof room.memberAll === "function") return await room.memberAll();
+        if (typeof room.memberList === "function") return await room.memberList();
+    } catch (e) {}
+    return [];
+}
+
+async function toSocialContact(contact: any, accountId: string): Promise<SocialContact> {
+    const id = contact.id;
+    return {
+        id,
+        name: contact.name(),
+        alias: await safeAlias(contact),
+        handle: safeHandle(contact),
+        memoryId: ["wechat", accountId, id].join("__")
     };
 }
 

@@ -2,6 +2,7 @@ import type { CharacterConfig, SocialMessageEvent } from "../core/types.js";
 
 export interface ServiceContext {
     contactId: string;
+    referencedContactIds: Array<{ label: string; contactId: string }>;
 }
 
 export interface ServiceMemoryRecord {
@@ -146,7 +147,24 @@ export class ServiceMemoryClient {
             occurredAt: event.receivedAt
         });
 
-        return { contactId: contact.id };
+        const referencedContactIds: Array<{ label: string; contactId: string }> = [];
+        const seen = new Set<string>([event.contact.id]);
+        for (const mentioned of event.mentionedContacts || []) {
+            if (seen.has(mentioned.id)) continue;
+            seen.add(mentioned.id);
+            const referenced = await this.post<any>("/contacts", {
+                platform: event.platform,
+                accountId: event.accountId,
+                externalId: mentioned.id,
+                memoryId: mentioned.memoryId,
+                name: mentioned.name,
+                alias: mentioned.alias,
+                handle: mentioned.handle
+            });
+            referencedContactIds.push({ label: mentioned.name, contactId: referenced.id });
+        }
+
+        return { contactId: contact.id, referencedContactIds };
     }
 
     async recordAssistantMessage(event: SocialMessageEvent, text: string, targetChannel: "GROUP" | "PRIVATE" = "GROUP"): Promise<string> {

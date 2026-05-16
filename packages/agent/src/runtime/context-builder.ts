@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { CharacterConfig, ContextPack, SocialMessageEvent } from "../core/types.js";
 import { memoryManager } from "../memory/memory-manager.js";
 import { memoryRetriever } from "../memory/memory-retriever.js";
@@ -26,11 +27,13 @@ export class ContextBuilder {
         let userProfile = fileProfile;
         let recentHistory = fileHistory;
         let pendingTasks = fileTasks;
+        let referencedProfiles = "";
 
         try {
             const serviceContext = await serviceMemoryClient.prepareEvent(this.character, event);
             serviceContactId = serviceContext.contactId;
             userProfile = (await memoryRetriever.retrieve(serviceContext.contactId, event)).text;
+            referencedProfiles = await this.retrieveReferencedProfiles(serviceContext.referencedContactIds, event);
             recentHistory = event.channel === "group"
                 ? "Group chat: contact-level persisted private history is withheld. Use the current room history and latest message only."
                 : await serviceMemoryClient.getRecentHistory(serviceContext.contactId);
@@ -46,6 +49,7 @@ export class ContextBuilder {
             recentHistory,
             pendingTasks,
             serviceContactId,
+            referencedProfiles,
             roomHistory: this.roomSessions.get(roomKey)!,
             relationshipHistory: this.relationshipSessions.get(relationshipKey)!
         };
@@ -75,9 +79,36 @@ export class ContextBuilder {
     }
 
     private loadSoul(): string {
-        return existsSync(this.character.soulPath)
-            ? readFileSync(this.character.soulPath, "utf8")
-            : `You are ${this.character.name}.`;
+        if (!existsSync(this.character.soulPath)) return `You are ${this.character.name}.`;
+
+        const soul = readFileSync(this.character.soulPath, "utf8");
+        const bubblePolicyPath = join(dirname(this.character.soulPath), "message-bubbles.md");
+        if (!existsSync(bubblePolicyPath)) return soul;
+
+        return `${soul}
+
+---
+
+${readFileSync(bubblePolicyPath, "utf8")}`;
+    }
+
+    private async retrieveReferencedProfiles(
+        referencedContactIds: Array<{ label: string; contactId: string }>,
+        event: SocialMessageEvent
+    ): Promise<string> {
+        if (referencedContactIds.length === 0) return "";
+
+        const sections: string[] = [];
+        for (const item of referencedContactIds.slice(0, 4)) {
+            try {
+                const retrieved = await memoryRetriever.retrieve(item.contactId, event);
+                sections.push(`[${item.label}]\n${retrieved.text}`);
+            } catch (e) {
+                console.warn(`[MEMORY] Failed to retrieve referenced contact memory for ${item.label}: ${e instanceof Error ? e.message : String(e)}`);
+            }
+        }
+
+        return sections.join("\n\n");
     }
 
     private getRoomKey(event: SocialMessageEvent): string {

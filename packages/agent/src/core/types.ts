@@ -38,6 +38,7 @@ export interface SocialMessageEvent extends SocialEventBase {
     channelId?: string;
     accountName?: string;
     contact: SocialContact;
+    mentionedContacts?: SocialContact[];
     text: string;
     segments: SocialMessageSegment[];
 }
@@ -91,6 +92,7 @@ export interface ContextPack {
     recentHistory: string;
     pendingTasks: string;
     serviceContactId?: string;
+    referencedProfiles?: string;
     roomHistory: any[];
     relationshipHistory: any[];
 }

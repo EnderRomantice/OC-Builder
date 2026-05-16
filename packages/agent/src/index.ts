@@ -17,6 +17,10 @@ let sessions: BotSession[] = [];
 
 process.on("uncaughtException", err => {
     console.error("[FATAL] Uncaught Exception:", err);
+    if (isWechatStartRace(err)) {
+        console.warn("[SYSTEM] Ignoring WeChat internal start race after bot restart.");
+        return;
+    }
     if (isProtocolFailure(err)) {
         restartAll(err.message);
     }
@@ -24,6 +28,10 @@ process.on("uncaughtException", err => {
 
 process.on("unhandledRejection", (reason, promise) => {
     console.error("[FATAL] Unhandled Rejection at:", promise, "reason:", reason);
+    if (isWechatStartRace(reason)) {
+        console.warn("[SYSTEM] Ignoring WeChat internal start race after bot restart.");
+        return;
+    }
     if (isProtocolFailure(reason)) {
         restartAll(String(reason));
     }
@@ -34,6 +42,9 @@ class BotSession {
     private runtime?: CharacterRuntime;
     private isRestarting = false;
     private errorCount = 0;
+    private restartAttempts = 0;
+    private loggedInAt = 0;
+    private state: "stopped" | "starting" | "scanning" | "logged-in" | "stopping" = "stopped";
     private readonly messageQueues = new Map<string, { timer: NodeJS.Timeout | null; texts: WeChatQueuedText[]; latestRaw: WeChatRawMessage }>();
 
     constructor(
@@ -42,6 +53,7 @@ class BotSession {
     ) {}
 
     async start() {
+        this.state = "starting";
         this.bot = WechatyBuilder.build({
             name: this.wechatyName()
         });
@@ -61,13 +73,16 @@ class BotSession {
     async restart(reason: string) {
         if (this.isRestarting) return;
         this.isRestarting = true;
-        console.log(`[SYSTEM] ${this.label()} protocol failure detected (${reason}). Rebuilding bot in 10s...`);
+        const delayMs = this.nextRestartDelayMs();
+        console.log(`[SYSTEM] ${this.label()} protocol failure detected (${reason}). Rebuilding bot in ${Math.round(delayMs / 1000)}s...`);
 
         try {
+            this.state = "stopping";
             await this.bot?.stop();
         } catch (e) {
             console.warn(`[SYSTEM] ${this.label()} bot stop failed during restart: ${e instanceof Error ? e.message : String(e)}`);
         }
+        this.state = "stopped";
 
         this.messageQueues.clear();
 
@@ -79,23 +94,39 @@ class BotSession {
                 .finally(() => {
                     this.isRestarting = false;
                 });
-        }, 10000);
+        }, delayMs);
     }
 
     private attachBotHandlers(activeBot: any) {
         activeBot.on("scan", (qrcode: string, status: number) => {
+            this.state = "scanning";
             const link = `https://wechaty.js.org/qrcode/${encodeURIComponent(qrcode)}`;
             console.log(`${this.ordinal}. ${this.character.displayName}：${link}`);
             console.log(`[SCAN] ${this.label()} status ${status}`);
         });
 
         activeBot.on("login", (user: any) => {
+            this.state = "logged-in";
+            this.loggedInAt = Date.now();
             this.errorCount = 0;
+            this.restartAttempts = 0;
             console.log(`${this.ordinal}. ${this.character.displayName}：logged in as ${user.name()}`);
         });
 
         activeBot.on("error", (error: Error) => {
             console.error(`[BOT ERROR] ${this.label()}:`, error.message);
+            if (this.isIgnorablePreLoginError(error)) {
+                console.warn(`[SYSTEM] ${this.label()} ignoring pre-login WeChat error while waiting for scan.`);
+                return;
+            }
+            if (this.isEarlyPostLoginNetworkDrop(error)) {
+                console.warn(`[SYSTEM] ${this.label()} early post-login network drop; waiting for WeChat session to settle.`);
+                return;
+            }
+            if (this.isRecoverableLoggedInNetworkDrop(error)) {
+                console.warn(`[SYSTEM] ${this.label()} network drop after login; keeping session alive instead of forcing re-login.`);
+                return;
+            }
             if (!isProtocolFailure(error)) return;
 
             this.errorCount++;
@@ -147,7 +178,7 @@ class BotSession {
                             void this.restart(e instanceof Error ? e.message : String(e));
                         }
                     }
-                }, 2500);
+                }, Number(process.env.WECHAT_INCOMING_BATCH_MS || 6000));
             } catch (e) {
                 console.error(`[BOT MESSAGE ERROR] ${this.label()}:`, e);
                 if (isProtocolFailure(e)) {
@@ -165,6 +196,35 @@ class BotSession {
 
     private label(): string {
         return `${this.ordinal}. ${this.character.displayName}`;
+    }
+
+    private isIgnorablePreLoginError(error: Error): boolean {
+        const message = `${error.message}\n${error.stack || ""}`;
+        return this.state !== "logged-in" && (
+            message.includes("400 != 400")
+            || message.includes("Cannot read properties of undefined (reading 'start')")
+        );
+    }
+
+    private isEarlyPostLoginNetworkDrop(error: Error): boolean {
+        const message = `${error.message}\n${error.stack || ""}`;
+        const settleMs = Number(process.env.WECHAT_LOGIN_SETTLE_MS || 20000);
+        return this.state === "logged-in"
+            && Date.now() - this.loggedInAt < settleMs
+            && (message.includes("socket hang up") || message.includes("timeout"));
+    }
+
+    private isRecoverableLoggedInNetworkDrop(error: Error): boolean {
+        const message = `${error.message}\n${error.stack || ""}`;
+        return this.state === "logged-in"
+            && (message.includes("socket hang up") || message.includes("timeout"));
+    }
+
+    private nextRestartDelayMs(): number {
+        this.restartAttempts++;
+        const baseMs = Number(process.env.WECHAT_RESTART_BASE_DELAY_MS || 30000);
+        const maxMs = Number(process.env.WECHAT_RESTART_MAX_DELAY_MS || 300000);
+        return Math.min(maxMs, baseMs * 2 ** Math.min(this.restartAttempts - 1, 4));
     }
 }
 
@@ -195,10 +255,14 @@ function isProtocolFailure(error: unknown): boolean {
         "Assertion",
         "socket hang up",
         "timeout",
-        "Cannot read properties of undefined (reading 'start')",
         "Cannot read properties of undefined (reading 'batchGetContact')",
         "Cannot read properties of undefined (reading 'contacts')"
     ].some(pattern => message.includes(pattern));
+}
+
+function isWechatStartRace(error: unknown): boolean {
+    const message = error instanceof Error ? `${error.message}\n${error.stack || ""}` : String(error);
+    return message.includes("Cannot read properties of undefined (reading 'start')");
 }
 
 function restartAll(reason: string) {

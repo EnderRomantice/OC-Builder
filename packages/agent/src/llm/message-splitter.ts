@@ -23,7 +23,7 @@ function splitMessageDeterministically(text: string): string[] {
         chunks.push(...splitLongLine(line, 90));
     }
 
-    return chunks.slice(0, 5);
+    return chunks.slice(0, 3);
 }
 
 function splitLongLine(line: string, maxLength: number): string[] {

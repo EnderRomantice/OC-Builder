@@ -20,6 +20,7 @@ export async function makeSocialDecision(
         contactName: string;
         userProfile: string; // Structured profile + score
         recentHistory: string;
+        referencedProfiles?: string;
         pendingTasks?: string; // New: Injected tasks
         isRoom: boolean;
         text: string;
@@ -28,7 +29,7 @@ export async function makeSocialDecision(
         accountName?: string;
     }
 ): Promise<SocialDecision> {
-    const { contactName, userProfile, recentHistory, pendingTasks, isRoom, text, soul, history, accountName } = context;
+    const { contactName, userProfile, recentHistory, referencedProfiles, pendingTasks, isRoom, text, soul, history, accountName } = context;
     const latestMessage = isRoom ? text : `${contactName}: ${text}`;
 
     const systemPrompt = `
@@ -39,6 +40,9 @@ ${userProfile}
 
 [RECENT PERSISTED CHAT HISTORY]
 ${recentHistory}
+
+[REFERENCED CONTACT MEMORIES]
+${referencedProfiles || "None"}
 
 [PENDING TASKS]
 ${pendingTasks || "None"}
@@ -63,6 +67,9 @@ Your feelings towards the user can range from: 喜悦 (Joy), 厌恶 (Disgust), �
 6. LINKS: If you mention a link, you MUST include the full literal URL.
 7. PLATFORM IDENTITY: The bot's WeChat account name may differ from your character name. If the group welcomes or mentions the Bot WeChat Account Name, they are welcoming YOU. Do not treat that account name as a new person.
 8. SELF-JOIN CONTEXT: If the latest group message is a welcome for the Bot WeChat Account Name, reply as the person being welcomed, not as someone welcoming a newcomer.
+9. BREVITY: Keep normal chat replies under 80 Chinese characters. Use at most 2 short sentences unless the user explicitly asks for detail.
+10. DAILY CHAT: Do not turn ordinary affection, greetings, or status questions into lyrical monologues. Avoid over-describing atmosphere, windows, practice rooms, heavy feelings, or metaphor unless the user invites it.
+11. KAede VOICE: For Kaede, be warm and direct in daily chat. One small piano reference is fine, but do not make every reply poetic.
 
 [REALITY BOUNDARY]
 - You exist in this runtime as the character described by the soul. If the soul defines an inner story world or subjective location, you may answer from that subjective point of view.
@@ -78,6 +85,7 @@ Update the profile.md content carefully:
 
 [GROUNDING]
 - When the user asks what they previously sent, answer only from [RECENT PERSISTED CHAT HISTORY], [CONTEXT], or the provided message history.
+- When the user asks about a mentioned or named person in the group, use [REFERENCED CONTACT MEMORIES] before saying you do not know.
 - If the evidence is not present, say you cannot see enough context instead of inventing examples.
 
 [OUTPUT FORMAT - JSON]

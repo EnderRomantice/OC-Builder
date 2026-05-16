@@ -8,6 +8,7 @@ export interface AgentLoopInput {
     soul: string;
     userProfile: string;
     recentHistory: string;
+    referencedProfiles?: string;
     pendingTasks: string;
     serviceContactId?: string;
     decision: { content: string; reason: string };
@@ -40,7 +41,7 @@ export class AgentLoop {
     }
 
     async run(input: AgentLoopInput): Promise<AgentLoopResult> {
-        const { event, soul, userProfile, recentHistory, pendingTasks, serviceContactId, decision, history } = input;
+        const { event, soul, userProfile, recentHistory, referencedProfiles, pendingTasks, serviceContactId, decision, history } = input;
         const contactName = event.contact.name;
         const latestMessage = event.segments.map(segment => `${segment.contact.name}: ${segment.text}`).join("\n");
         const messages: any[] = [
@@ -66,6 +67,9 @@ ${userProfile}
 
 [RECENT PERSISTED CHAT HISTORY]
 ${recentHistory}
+
+[REFERENCED CONTACT MEMORIES]
+${referencedProfiles || "None"}
 
 [PENDING TASKS]
 ${pendingTasks}
